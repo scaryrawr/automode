@@ -1,0 +1,22 @@
+{
+  "name": "automode",
+  "private": true,
+  "description": "Copilot CLI extension for shell command review",
+  "type": "module",
+  "scripts": {
+    "build": "rolldown -c",
+    "typecheck": "tsgo -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@github/copilot-sdk": "^0.2.2",
+    "xdg-basedir": "^5.1.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^24.12.2",
+    "@typescript/native-preview": "^7.0.0-dev.20260418.1",
+    "rolldown": "^1.0.0-rc.16",
+    "vitest": "^4.1.4"
+  }
+}
