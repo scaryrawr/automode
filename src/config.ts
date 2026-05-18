@@ -2,17 +2,23 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { xdgConfig } from "xdg-basedir";
-import z from "zod";
+import { z } from "zod";
 
 const CONFIG_DIR = xdgConfig ? join(xdgConfig, "copilot") : join(homedir(), ".copilot");
 
 const CONFIG_FILE = join(CONFIG_DIR, "automode.json");
 
+const ClassifierModelSchema = z.preprocess(
+  (value) => (typeof value === "string" ? value.trim() || undefined : value),
+  z.string().min(1).optional(),
+);
+
 const ConfigSchema = z.object({
   autoMode: z.boolean().default(false),
+  classifierModel: ClassifierModelSchema,
 });
 
-type Configuration = z.infer<typeof ConfigSchema>;
+export type Configuration = z.infer<typeof ConfigSchema>;
 
 /**
  * Reads the persisted config file and normalizes it with schema defaults.
@@ -69,6 +75,19 @@ export const loadConfig = async (): Promise<Configuration> => {
     },
     set autoMode(value: boolean) {
       state.autoMode = value;
+      const snapshot: Configuration = { ...state };
+      persistSnapshot(snapshot);
+    },
+    get classifierModel() {
+      return state.classifierModel;
+    },
+    set classifierModel(value: string | undefined) {
+      const normalizedValue = typeof value === "string" ? value.trim() : undefined;
+      if (normalizedValue) {
+        state.classifierModel = normalizedValue;
+      } else {
+        delete state.classifierModel;
+      }
       const snapshot: Configuration = { ...state };
       persistSnapshot(snapshot);
     },

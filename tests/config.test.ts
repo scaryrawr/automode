@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
   const mkdir = vi.fn();
@@ -42,6 +42,10 @@ async function flushMicrotasks() {
 }
 
 describe("loadConfig", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("queues config writes with snapshots in setter order", async () => {
     const firstWrite = createDeferred<void>();
     const secondWrite = createDeferred<void>();
@@ -80,5 +84,47 @@ describe("loadConfig", () => {
 
     secondWrite.resolve();
     await flushMicrotasks();
+  });
+
+  it("loads and persists the configured classifier model", async () => {
+    mocks.mkdir.mockResolvedValue(undefined);
+    mocks.readFile.mockResolvedValue(
+      JSON.stringify({ autoMode: true, classifierModel: " gpt-5-mini " }),
+    );
+    mocks.writeFile.mockResolvedValue(undefined);
+
+    const { loadConfig } = await loadConfigModule();
+    const config = await loadConfig();
+
+    expect(config.classifierModel).toBe("gpt-5-mini");
+
+    config.classifierModel = " claude-sonnet-4.5 ";
+    await flushMicrotasks();
+
+    expect(mocks.writeFile).toHaveBeenCalledWith(
+      "/tmp/copilot-config/copilot/automode.json",
+      JSON.stringify({ autoMode: true, classifierModel: "claude-sonnet-4.5" }, null, 2),
+      "utf-8",
+    );
+  });
+
+  it("clears the classifier model to use the Copilot default", async () => {
+    mocks.mkdir.mockResolvedValue(undefined);
+    mocks.readFile.mockResolvedValue(
+      JSON.stringify({ autoMode: true, classifierModel: "gpt-5-mini" }),
+    );
+    mocks.writeFile.mockResolvedValue(undefined);
+
+    const { loadConfig } = await loadConfigModule();
+    const config = await loadConfig();
+
+    config.classifierModel = undefined;
+    await flushMicrotasks();
+
+    expect(mocks.writeFile).toHaveBeenCalledWith(
+      "/tmp/copilot-config/copilot/automode.json",
+      JSON.stringify({ autoMode: true }, null, 2),
+      "utf-8",
+    );
   });
 });
