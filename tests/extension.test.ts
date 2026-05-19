@@ -55,6 +55,15 @@ function getPreToolHandler() {
   return config.hooks.onPreToolUse as (request: unknown) => Promise<unknown>;
 }
 
+function getHooks() {
+  const [config] = mocks.joinSession.mock.calls.at(-1) ?? [];
+  return config.hooks as {
+    onSessionStart: (request: unknown, invocation?: { sessionId: string }) => Promise<unknown>;
+    onUserPromptSubmitted: (request: unknown, invocation?: { sessionId: string }) => Promise<unknown>;
+    onPreToolUse: (request: unknown, invocation?: { sessionId: string }) => Promise<unknown>;
+  };
+}
+
 function getCommandHandler(commandName: string) {
   const [config] = mocks.joinSession.mock.calls.at(-1) ?? [];
   const command = config.commands.find(
@@ -66,8 +75,14 @@ function getCommandHandler(commandName: string) {
 describe("extension pre-tool hook", () => {
   let config: { autoMode: boolean; classifierModel?: string };
 
-  function createShellToolInput(command: string, description: string, cwd = "/workspace") {
+  function createShellToolInput(
+    command: string,
+    description: string,
+    cwd = "/workspace",
+    sessionId = "test-session",
+  ) {
     return {
+      sessionId,
       toolName: "bash",
       toolArgs: JSON.stringify({
         command,
@@ -83,6 +98,7 @@ describe("extension pre-tool hook", () => {
   const shellToolInput = createShellToolInput(shellCommand, shellDescription);
 
   const objectShellToolInput = {
+    sessionId: "test-session",
     toolName: "bash",
     toolArgs: {
       command: shellCommand,
@@ -129,6 +145,8 @@ describe("extension pre-tool hook", () => {
     const [joinConfig] = mocks.joinSession.mock.calls.at(-1) ?? [];
     expect(joinConfig.onPermissionRequest).toBeUndefined();
     expect(joinConfig.hooks.onPreToolUse).toBeTypeOf("function");
+    expect(joinConfig.hooks.onSessionStart).toBeTypeOf("function");
+    expect(joinConfig.hooks.onUserPromptSubmitted).toBeTypeOf("function");
   });
 
   it("falls back to normal permission flow when auto mode is disabled", async () => {
@@ -149,10 +167,22 @@ describe("extension pre-tool hook", () => {
 
     expect(mocks.classifyShellSafetyWithModel).toHaveBeenCalledTimes(1);
     expect(mocks.classifyShellSafetyWithModel).toHaveBeenCalledWith(
-      {
+      expect.objectContaining({
         command: shellCommand,
         intention: shellDescription,
-      },
+        shellRequest: expect.objectContaining({
+          fullCommandText: shellCommand,
+          intention: shellDescription,
+          commands: [
+            {
+              identifier: "npm",
+              readOnly: false,
+              args: ["test", "--", "--runInBand"],
+            },
+          ],
+          cwd: "/workspace",
+        }),
+      }),
       undefined,
     );
   });
@@ -166,10 +196,10 @@ describe("extension pre-tool hook", () => {
     });
 
     expect(mocks.classifyShellSafetyWithModel).toHaveBeenCalledWith(
-      {
+      expect.objectContaining({
         command: shellCommand,
         intention: shellDescription,
-      },
+      }),
       undefined,
     );
   });
@@ -183,10 +213,10 @@ describe("extension pre-tool hook", () => {
     await expect(onPreToolUse(shellToolInput)).resolves.toEqual({ permissionDecision: "allow" });
 
     expect(mocks.classifyShellSafetyWithModel).toHaveBeenCalledWith(
-      {
+      expect.objectContaining({
         command: shellCommand,
         intention: shellDescription,
-      },
+      }),
       "gpt-5-mini",
     );
   });
@@ -200,12 +230,93 @@ describe("extension pre-tool hook", () => {
     await expect(onPreToolUse(shellToolInput)).resolves.toEqual({ permissionDecision: "allow" });
 
     expect(mocks.classifyShellSafetyWithModel).toHaveBeenCalledWith(
-      {
+      expect.objectContaining({
         command: shellCommand,
         intention: shellDescription,
-      },
+      }),
       "claude-sonnet-4.5",
     );
+  });
+
+  it("passes the latest submitted user prompt to shell classifications", async () => {
+    await loadExtensionModule();
+    const hooks = getHooks();
+
+    await expect(
+      hooks.onUserPromptSubmitted({
+        prompt: "Please run the test suite",
+        timestamp: 1,
+        cwd: "/workspace",
+      }, { sessionId: "test-session" }),
+    ).resolves.toBeUndefined();
+    await expect(
+      hooks.onPreToolUse(
+        { ...shellToolInput, sessionId: undefined },
+        { sessionId: "test-session" },
+      ),
+    ).resolves.toEqual({
+      permissionDecision: "allow",
+    });
+
+    expect(mocks.classifyShellSafetyWithModel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: shellCommand,
+        intention: shellDescription,
+        latestUserPrompt: "Please run the test suite",
+      }),
+      undefined,
+    );
+  });
+
+  it("uses the session initial prompt before any submitted user prompt", async () => {
+    await loadExtensionModule();
+    const hooks = getHooks();
+
+    await expect(
+      hooks.onSessionStart({
+        source: "startup",
+        initialPrompt: "Run the focused tests",
+        timestamp: 1,
+        cwd: "/workspace",
+      }, { sessionId: "test-session" }),
+    ).resolves.toBeUndefined();
+    await expect(
+      hooks.onPreToolUse(
+        { ...shellToolInput, sessionId: undefined },
+        { sessionId: "test-session" },
+      ),
+    ).resolves.toEqual({
+      permissionDecision: "allow",
+    });
+
+    expect(mocks.classifyShellSafetyWithModel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        latestUserPrompt: "Run the focused tests",
+      }),
+      undefined,
+    );
+  });
+
+  it("keeps latest user prompts isolated by session id", async () => {
+    await loadExtensionModule();
+    const hooks = getHooks();
+
+    await hooks.onUserPromptSubmitted({
+      prompt: "Publish to main",
+      timestamp: 1,
+      cwd: "/workspace",
+    }, { sessionId: "other-session" });
+    await expect(
+      hooks.onPreToolUse(
+        { ...shellToolInput, sessionId: undefined },
+        { sessionId: "test-session" },
+      ),
+    ).resolves.toEqual({
+      permissionDecision: "allow",
+    });
+
+    const [classifierInput] = mocks.classifyShellSafetyWithModel.mock.calls[0] ?? [];
+    expect(classifierInput).not.toHaveProperty("latestUserPrompt");
   });
 
   it("denies blocked shell classifications with a default reason", async () => {
@@ -344,10 +455,21 @@ describe("extension pre-tool hook", () => {
     });
     expect(mocks.classifyShellSafetyWithModel).toHaveBeenCalledTimes(1);
     expect(mocks.classifyShellSafetyWithModel).toHaveBeenCalledWith(
-      {
+      expect.objectContaining({
         command,
         intention: description,
-      },
+        shellRequest: expect.objectContaining({
+          fullCommandText: command,
+          intention: description,
+          commands: [
+            {
+              identifier: "./grep",
+              readOnly: false,
+              args: ["-n", "TODO", "src/extension.ts"],
+            },
+          ],
+        }),
+      }),
       undefined,
     );
   });
@@ -398,10 +520,16 @@ describe("extension pre-tool hook", () => {
     });
     expect(mocks.classifyShellSafetyWithModel).toHaveBeenCalledTimes(1);
     expect(mocks.classifyShellSafetyWithModel).toHaveBeenCalledWith(
-      {
+      expect.objectContaining({
         command,
         intention: description,
-      },
+        shellRequest: expect.objectContaining({
+          fullCommandText: command,
+          intention: description,
+          possiblePaths: [`../${path.basename(process.cwd())}/logs/grep-output.txt`],
+          cwd: shellCwd,
+        }),
+      }),
       undefined,
     );
   });
@@ -448,10 +576,21 @@ describe("extension pre-tool hook", () => {
     });
     expect(mocks.classifyShellSafetyWithModel).toHaveBeenCalledTimes(1);
     expect(mocks.classifyShellSafetyWithModel).toHaveBeenCalledWith(
-      {
+      expect.objectContaining({
         command,
         intention: description,
-      },
+        shellRequest: expect.objectContaining({
+          fullCommandText: command,
+          intention: description,
+          commands: [
+            {
+              identifier: "git",
+              readOnly: false,
+              args: ["push", "origin", "main"],
+            },
+          ],
+        }),
+      }),
       undefined,
     );
   });
@@ -482,10 +621,14 @@ describe("extension pre-tool hook", () => {
     });
     expect(mocks.classifyShellSafetyWithModel).toHaveBeenCalledTimes(1);
     expect(mocks.classifyShellSafetyWithModel).toHaveBeenCalledWith(
-      {
+      expect.objectContaining({
         command: shellCommand,
         intention: shellDescription,
-      },
+        shellRequest: expect.objectContaining({
+          fullCommandText: shellCommand,
+          intention: shellDescription,
+        }),
+      }),
       undefined,
     );
   });

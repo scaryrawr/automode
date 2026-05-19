@@ -40,6 +40,7 @@ export const ShellPermissionRequestSchema = z.object({
 export type ShellPermissionRequest = z.infer<typeof ShellPermissionRequestSchema>;
 
 export const PreToolUseInputSchema = z.looseObject({
+  sessionId: z.string().optional(),
   timestamp: z.number(),
   cwd: z.string(),
   toolName: z.string(),

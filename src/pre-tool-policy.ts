@@ -3,7 +3,12 @@ import {
   createShellPermissionRequestFromCommandText,
   getShellFastPathDecision,
 } from "./shell-safety.js";
-import { PreToolUseInputSchema, ShellToolArgsSchema, type PreToolUseHookOutput } from "./types.js";
+import {
+  PreToolUseInputSchema,
+  ShellToolArgsSchema,
+  type PreToolUseHookOutput,
+  type ShellPermissionRequest,
+} from "./types.js";
 
 const SHELL_TOOL_NAMES = new Set(["bash", "shell"]);
 const READ_TOOL_NAMES = new Set(["read", "view"]);
@@ -15,14 +20,24 @@ type ShellSafetyClassification = {
 };
 
 type ClassifyShellSafety = (
-  input: { command: string; intention: string },
+  input: {
+    command: string;
+    intention: string;
+    latestUserPrompt?: string | undefined;
+    shellRequest?: ShellPermissionRequest | undefined;
+  },
   model?: string,
 ) => Promise<ShellSafetyClassification>;
 
 type PreToolPolicyOptions = {
   config: Configuration;
   classifyShellSafetyWithModel: ClassifyShellSafety;
+  getLatestUserPrompt?: (sessionId: string) => string | undefined;
   logger: Logger;
+};
+
+type HookInvocation = {
+  sessionId: string;
 };
 
 type Logger = {
@@ -59,6 +74,7 @@ async function handleShellPreToolRequest(
   command: string,
   intention: string,
   shellRequest: Awaited<ReturnType<typeof createShellPermissionRequestFromCommandText>>,
+  latestUserPrompt: string | undefined,
   { config, classifyShellSafetyWithModel, logger }: PreToolPolicyOptions,
 ): Promise<PreToolUseHookOutput | undefined> {
   if (shellRequest) {
@@ -78,6 +94,8 @@ async function handleShellPreToolRequest(
       {
         command,
         intention,
+        ...(latestUserPrompt === undefined ? {} : { latestUserPrompt }),
+        ...(shellRequest === null ? {} : { shellRequest }),
       },
       config.classifierModel,
     );
@@ -99,7 +117,10 @@ async function handleShellPreToolRequest(
 }
 
 export function createPreToolUseHandler(options: PreToolPolicyOptions) {
-  return async (input: unknown): Promise<PreToolUseHookOutput | undefined> => {
+  return async (
+    input: unknown,
+    invocation?: HookInvocation,
+  ): Promise<PreToolUseHookOutput | undefined> => {
     const preToolInputParse = PreToolUseInputSchema.safeParse(input);
     if (!preToolInputParse.success || !options.config.autoMode) {
       return undefined;
@@ -126,7 +147,10 @@ export function createPreToolUseHandler(options: PreToolPolicyOptions) {
       description,
       preToolInput.cwd,
     );
+    const sessionId = preToolInput.sessionId ?? invocation?.sessionId;
+    const latestUserPrompt =
+      sessionId === undefined ? undefined : options.getLatestUserPrompt?.(sessionId);
 
-    return handleShellPreToolRequest(command, description, shellRequest, options);
+    return handleShellPreToolRequest(command, description, shellRequest, latestUserPrompt, options);
   };
 }
