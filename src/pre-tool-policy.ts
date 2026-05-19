@@ -22,7 +22,14 @@ type ClassifyShellSafety = (
 type PreToolPolicyOptions = {
   config: Configuration;
   classifyShellSafetyWithModel: ClassifyShellSafety;
-  logClassifierError: (error: unknown) => void;
+  logger: Logger;
+};
+
+type Logger = {
+  log: (
+    message: string,
+    options?: { ephemeral?: boolean; level?: "info" | "warning" | "error" },
+  ) => Promise<void> | void;
 };
 
 function getNormalizedToolName(toolName: string): string {
@@ -44,11 +51,15 @@ function getClassifierDenialMessage(reason: string | undefined): string {
   return reason?.trim() || "Blocked by safety classifier.";
 }
 
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 async function handleShellPreToolRequest(
   command: string,
   intention: string,
   shellRequest: Awaited<ReturnType<typeof createShellPermissionRequestFromCommandText>>,
-  { config, classifyShellSafetyWithModel, logClassifierError }: PreToolPolicyOptions,
+  { config, classifyShellSafetyWithModel, logger }: PreToolPolicyOptions,
 ): Promise<PreToolUseHookOutput | undefined> {
   if (shellRequest) {
     const fastPathDecision = getShellFastPathDecision(shellRequest);
@@ -79,7 +90,10 @@ async function handleShellPreToolRequest(
         return undefined;
     }
   } catch (error) {
-    logClassifierError(error);
+    void logger.log(`classifier error: ${getErrorMessage(error)}`, {
+      ephemeral: true,
+      level: "error",
+    });
     return undefined;
   }
 }

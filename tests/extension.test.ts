@@ -244,6 +244,10 @@ describe("extension pre-tool hook", () => {
     const onPreToolUse = getPreToolHandler();
 
     await expect(onPreToolUse(shellToolInput)).resolves.toBeUndefined();
+    expect(mocks.log).toHaveBeenCalledWith("classifier error: classifier unavailable", {
+      ephemeral: true,
+      level: "error",
+    });
   });
 
   it("approves read and write tools directly", async () => {

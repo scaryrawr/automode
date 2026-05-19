@@ -17,11 +17,8 @@ session = await joinSession({
     onPreToolUse: createPreToolUseHandler({
       config,
       classifyShellSafetyWithModel,
-      logClassifierError: (err) => {
-        void session.log(`classifier error: ${(err as Error).message}`, {
-          ephemeral: true,
-          level: "error",
-        });
+      logger: {
+        log: (...args) => session.log(...args),
       },
     }),
   },

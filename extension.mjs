@@ -4772,7 +4772,10 @@ function denyToolUse(reason) {
 function getClassifierDenialMessage(reason) {
 	return reason?.trim() || "Blocked by safety classifier.";
 }
-async function handleShellPreToolRequest(command, intention, shellRequest, { config, classifyShellSafetyWithModel, logClassifierError }) {
+function getErrorMessage(error) {
+	return error instanceof Error ? error.message : String(error);
+}
+async function handleShellPreToolRequest(command, intention, shellRequest, { config, classifyShellSafetyWithModel, logger }) {
 	if (shellRequest) {
 		const fastPathDecision = getShellFastPathDecision(shellRequest);
 		switch (fastPathDecision.kind) {
@@ -4792,7 +4795,10 @@ async function handleShellPreToolRequest(command, intention, shellRequest, { con
 			default: return;
 		}
 	} catch (error) {
-		logClassifierError(error);
+		logger.log(`classifier error: ${getErrorMessage(error)}`, {
+			ephemeral: true,
+			level: "error"
+		});
 		return;
 	}
 }
@@ -4825,12 +4831,7 @@ session = await joinSession({
 	hooks: { onPreToolUse: createPreToolUseHandler({
 		config,
 		classifyShellSafetyWithModel,
-		logClassifierError: (err) => {
-			session.log(`classifier error: ${err.message}`, {
-				ephemeral: true,
-				level: "error"
-			});
-		}
+		logger: { log: (...args) => session.log(...args) }
 	}) }
 });
 session.on("session.shutdown", async () => {
