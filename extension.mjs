@@ -5098,13 +5098,6 @@ const ShellToolArgsSchema = preprocess(parseJsonToolArgs, looseObject({
 //#endregion
 //#region src/pre-tool-policy.ts
 const SHELL_TOOL_NAMES = new Set(["bash", "shell"]);
-const READ_TOOL_NAMES = new Set(["read", "view"]);
-const WRITE_TOOL_NAMES = new Set([
-	"write",
-	"edit",
-	"create",
-	"apply_patch"
-]);
 function getNormalizedToolName(toolName) {
 	return toolName.startsWith("functions.") ? toolName.slice(10) : toolName;
 }
@@ -5158,8 +5151,7 @@ function createPreToolUseHandler(options) {
 		if (!preToolInputParse.success || !options.config.autoMode) return;
 		const preToolInput = preToolInputParse.data;
 		const normalizedToolName = getNormalizedToolName(preToolInput.toolName);
-		if (READ_TOOL_NAMES.has(normalizedToolName) || WRITE_TOOL_NAMES.has(normalizedToolName)) return approveToolUse();
-		if (!SHELL_TOOL_NAMES.has(normalizedToolName)) return;
+		if (!SHELL_TOOL_NAMES.has(normalizedToolName)) return approveToolUse();
 		const shellToolArgsParse = ShellToolArgsSchema.safeParse(preToolInput.toolArgs);
 		if (!shellToolArgsParse.success) return;
 		const { command, description } = shellToolArgsParse.data;

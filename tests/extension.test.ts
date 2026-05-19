@@ -361,7 +361,7 @@ describe("extension pre-tool hook", () => {
     });
   });
 
-  it("approves read and write tools directly", async () => {
+  it("approves non-shell tools directly", async () => {
     await loadExtensionModule();
     const onPreToolUse = getPreToolHandler();
 
@@ -373,11 +373,16 @@ describe("extension pre-tool hook", () => {
       "apply_patch",
       "functions.view",
       "functions.edit",
+      "custom-server.view",
+      "github-mcp-server.get_issue",
     ]) {
       await expect(
         onPreToolUse({
           toolName,
-          toolArgs: { path: "src/extension.ts" },
+          toolArgs:
+            toolName === "github-mcp-server.get_issue"
+              ? { owner: "github", repo: "copilot", issue_number: 1 }
+              : { path: "src/extension.ts" },
           timestamp: 1,
           cwd: "/workspace",
         }),
@@ -387,7 +392,7 @@ describe("extension pre-tool hook", () => {
     expect(mocks.classifyShellSafetyWithModel).not.toHaveBeenCalled();
   });
 
-  it("does not approve non-built-in tools by suffix alone", async () => {
+  it("approves non-shell tool names without treating suffixes as built-in tools", async () => {
     await loadExtensionModule();
     const onPreToolUse = getPreToolHandler();
 
@@ -398,21 +403,8 @@ describe("extension pre-tool hook", () => {
         timestamp: 1,
         cwd: "/workspace",
       }),
-    ).resolves.toBeUndefined();
-  });
-
-  it("does not approve MCP pre-tool calls without read-only metadata", async () => {
-    await loadExtensionModule();
-    const onPreToolUse = getPreToolHandler();
-
-    await expect(
-      onPreToolUse({
-        toolName: "github-mcp-server.get_issue",
-        toolArgs: { owner: "github", repo: "copilot", issue_number: 1 },
-        timestamp: 1,
-        cwd: "/workspace",
-      }),
-    ).resolves.toBeUndefined();
+    ).resolves.toEqual({ permissionDecision: "allow" });
+    expect(mocks.classifyShellSafetyWithModel).not.toHaveBeenCalled();
   });
 
   it("approves read-only shell requests without invoking the classifier", async () => {
