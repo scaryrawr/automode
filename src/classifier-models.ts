@@ -1,9 +1,8 @@
-import { execFile } from "node:child_process";
 import type { ModelInfo } from "@github/copilot-sdk";
 import { z } from "zod";
+import { getGitHubAuthToken } from "./github-auth.js";
 
 const COPILOT_MODELS_URL = "https://api.githubcopilot.com/models";
-const GH_AUTH_TOKEN_TIMEOUT_MS = 10_000;
 const DEFAULT_MODEL_CAPABILITIES: ModelInfo["capabilities"] = {
   supports: {
     vision: false,
@@ -24,44 +23,6 @@ const ApiModelListSchema = z.looseObject({
 });
 
 type ApiModel = z.infer<typeof ApiModelSchema>;
-
-function getRequiredEnv(name: string): string | undefined {
-  const value = process.env[name]?.trim();
-  return value ? value : undefined;
-}
-
-function getGitHubAuthToken(): Promise<string> {
-  const envToken = getRequiredEnv("GH_TOKEN") ?? getRequiredEnv("GITHUB_TOKEN");
-  if (envToken) {
-    return Promise.resolve(envToken);
-  }
-
-  return new Promise((resolve, reject) => {
-    execFile(
-      "gh",
-      ["auth", "token"],
-      {
-        encoding: "utf8",
-        timeout: GH_AUTH_TOKEN_TIMEOUT_MS,
-        maxBuffer: 1024 * 1024,
-      },
-      (error, stdout) => {
-        if (error) {
-          reject(error);
-          return;
-        }
-
-        const token = stdout.trim();
-        if (!token) {
-          reject(new Error("gh auth token returned an empty token"));
-          return;
-        }
-
-        resolve(token);
-      },
-    );
-  });
-}
 
 function getCopilotHeaders(token: string): Record<string, string> {
   return {

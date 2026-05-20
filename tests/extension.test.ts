@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => {
   const loadConfig = vi.fn();
   const classifyShellSafetyWithModel = vi.fn();
   const closeClassifierClient = vi.fn();
+  const getGitHubAuthToken = vi.fn();
   const listClassifierModels = vi.fn();
   const log = vi.fn();
   const on = vi.fn();
@@ -15,6 +16,7 @@ const mocks = vi.hoisted(() => {
   return {
     classifyShellSafetyWithModel,
     closeClassifierClient,
+    getGitHubAuthToken,
     joinSession,
     listClassifierModels,
     loadConfig,
@@ -39,6 +41,10 @@ vi.mock("../src/classifier-models.js", () => ({
 
 vi.mock("../src/config.js", () => ({
   loadConfig: mocks.loadConfig,
+}));
+
+vi.mock("../src/github-auth.js", () => ({
+  getGitHubAuthToken: mocks.getGitHubAuthToken,
 }));
 
 async function loadExtensionModule() {
@@ -109,6 +115,7 @@ describe("extension pre-tool hook", () => {
     vi.clearAllMocks();
 
     config = { autoMode: true };
+    mocks.getGitHubAuthToken.mockResolvedValue("github-token");
     mocks.loadConfig.mockResolvedValue(config);
     mocks.classifyShellSafetyWithModel.mockResolvedValue({
       classification: "allow",
@@ -138,6 +145,24 @@ describe("extension pre-tool hook", () => {
     expect(joinConfig.hooks.onPreToolUse).toBeTypeOf("function");
     expect(joinConfig.hooks.onSessionStart).toBeTypeOf("function");
     expect(joinConfig.hooks.onUserPromptSubmitted).toBeTypeOf("function");
+  });
+
+  it("does not register when GitHub authentication is unavailable", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    mocks.getGitHubAuthToken.mockRejectedValueOnce(new Error("gh auth token failed"));
+
+    try {
+      await loadExtensionModule();
+
+      expect(mocks.loadConfig).not.toHaveBeenCalled();
+      expect(mocks.joinSession).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledWith(
+        "automode extension disabled: GitHub authentication unavailable. Set GH_TOKEN or GITHUB_TOKEN, or run `gh auth login` so `gh auth token` succeeds.",
+        "gh auth token failed",
+      );
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("falls back to normal permission flow when auto mode is disabled", async () => {

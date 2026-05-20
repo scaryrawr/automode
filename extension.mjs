@@ -61,7 +61,7 @@ var $ZodEncodeError = class extends Error {
 };
 (_a$1 = globalThis).__zod_globalConfig ?? (_a$1.__zod_globalConfig = {});
 const globalConfig = globalThis.__zod_globalConfig;
-function config$1(newConfig) {
+function config(newConfig) {
 	if (newConfig) Object.assign(globalConfig, newConfig);
 	return globalConfig;
 }
@@ -409,7 +409,7 @@ function flattenError(error, mapper = (issue) => issue.message) {
 		fieldErrors
 	};
 }
-function formatError(error, mapper = (issue) => issue.message) {
+function formatError$1(error, mapper = (issue) => issue.message) {
 	const fieldErrors = { _errors: [] };
 	const processError = (error, path = []) => {
 		for (const issue of error.issues) if (issue.code === "invalid_union" && issue.errors.length) issue.errors.map((issues) => processError({ issues }, [...path, ...issue.path]));
@@ -450,7 +450,7 @@ const _parse = (_Err) => (schema, value, _ctx, _params) => {
 	}, ctx);
 	if (result instanceof Promise) throw new $ZodAsyncError();
 	if (result.issues.length) {
-		const e = new (_params?.Err ?? _Err)(result.issues.map((iss) => finalizeIssue(iss, ctx, config$1())));
+		const e = new (_params?.Err ?? _Err)(result.issues.map((iss) => finalizeIssue(iss, ctx, config())));
 		captureStackTrace(e, _params?.callee);
 		throw e;
 	}
@@ -467,7 +467,7 @@ const _parseAsync = (_Err) => async (schema, value, _ctx, params) => {
 	}, ctx);
 	if (result instanceof Promise) result = await result;
 	if (result.issues.length) {
-		const e = new (params?.Err ?? _Err)(result.issues.map((iss) => finalizeIssue(iss, ctx, config$1())));
+		const e = new (params?.Err ?? _Err)(result.issues.map((iss) => finalizeIssue(iss, ctx, config())));
 		captureStackTrace(e, params?.callee);
 		throw e;
 	}
@@ -485,7 +485,7 @@ const _safeParse = (_Err) => (schema, value, _ctx) => {
 	if (result instanceof Promise) throw new $ZodAsyncError();
 	return result.issues.length ? {
 		success: false,
-		error: new (_Err ?? $ZodError)(result.issues.map((iss) => finalizeIssue(iss, ctx, config$1())))
+		error: new (_Err ?? $ZodError)(result.issues.map((iss) => finalizeIssue(iss, ctx, config())))
 	} : {
 		success: true,
 		data: result.value
@@ -504,7 +504,7 @@ const _safeParseAsync = (_Err) => async (schema, value, _ctx) => {
 	if (result instanceof Promise) result = await result;
 	return result.issues.length ? {
 		success: false,
-		error: new _Err(result.issues.map((iss) => finalizeIssue(iss, ctx, config$1())))
+		error: new _Err(result.issues.map((iss) => finalizeIssue(iss, ctx, config())))
 	} : {
 		success: true,
 		data: result.value
@@ -1728,7 +1728,7 @@ function handleUnionResults(results, final, inst, ctx) {
 		code: "invalid_union",
 		input: final.value,
 		inst,
-		errors: results.map((result) => result.issues.map((iss) => finalizeIssue(iss, ctx, config$1())))
+		errors: results.map((result) => result.issues.map((iss) => finalizeIssue(iss, ctx, config())))
 	});
 	return final;
 }
@@ -2040,7 +2040,7 @@ const $ZodCatch = /* @__PURE__ */ $constructor("$ZodCatch", (inst, def) => {
 			if (result.issues.length) {
 				payload.value = def.catchValue({
 					...payload,
-					error: { issues: result.issues.map((iss) => finalizeIssue(iss, ctx, config$1())) },
+					error: { issues: result.issues.map((iss) => finalizeIssue(iss, ctx, config())) },
 					input: payload.value
 				});
 				payload.issues = [];
@@ -2052,7 +2052,7 @@ const $ZodCatch = /* @__PURE__ */ $constructor("$ZodCatch", (inst, def) => {
 		if (result.issues.length) {
 			payload.value = def.catchValue({
 				...payload,
-				error: { issues: result.issues.map((iss) => finalizeIssue(iss, ctx, config$1())) },
+				error: { issues: result.issues.map((iss) => finalizeIssue(iss, ctx, config())) },
 				input: payload.value
 			});
 			payload.issues = [];
@@ -3246,7 +3246,7 @@ const initializer = (inst, issues) => {
 	$ZodError.init(inst, issues);
 	inst.name = "ZodError";
 	Object.defineProperties(inst, {
-		format: { value: (mapper) => formatError(inst, mapper) },
+		format: { value: (mapper) => formatError$1(inst, mapper) },
 		flatten: { value: (mapper) => flattenError(inst, mapper) },
 		addIssue: { value: (issue) => {
 			inst.issues.push(issue);
@@ -4071,21 +4071,8 @@ function preprocess(fn, schema) {
 	});
 }
 //#endregion
-//#region src/classifier-models.ts
-const COPILOT_MODELS_URL = "https://api.githubcopilot.com/models";
+//#region src/github-auth.ts
 const GH_AUTH_TOKEN_TIMEOUT_MS = 1e4;
-const DEFAULT_MODEL_CAPABILITIES = {
-	supports: {
-		vision: false,
-		reasoningEffort: false
-	},
-	limits: { max_context_window_tokens: 0 }
-};
-const ApiModelSchema = looseObject({
-	id: string().min(1),
-	name: string().min(1).optional()
-});
-const ApiModelListSchema = looseObject({ data: array(ApiModelSchema) });
 function getRequiredEnv(name) {
 	const value = process.env[name]?.trim();
 	return value ? value : void 0;
@@ -4112,6 +4099,21 @@ function getGitHubAuthToken() {
 		});
 	});
 }
+//#endregion
+//#region src/classifier-models.ts
+const COPILOT_MODELS_URL = "https://api.githubcopilot.com/models";
+const DEFAULT_MODEL_CAPABILITIES = {
+	supports: {
+		vision: false,
+		reasoningEffort: false
+	},
+	limits: { max_context_window_tokens: 0 }
+};
+const ApiModelSchema = looseObject({
+	id: string().min(1),
+	name: string().min(1).optional()
+});
+const ApiModelListSchema = looseObject({ data: array(ApiModelSchema) });
 function getCopilotHeaders(token) {
 	return {
 		Accept: "application/json",
@@ -8533,8 +8535,6 @@ function createPreToolUseHandler(options) {
 }
 //#endregion
 //#region src/extension.ts
-const config = await loadConfig();
-let session;
 const latestUserPrompts = /* @__PURE__ */ new Map();
 function rememberInitialPrompt(input, invocation) {
 	const sessionId = input.sessionId ?? invocation?.sessionId;
@@ -8544,31 +8544,48 @@ function rememberLatestUserPrompt(input, invocation) {
 	const sessionId = input.sessionId ?? invocation?.sessionId;
 	if (sessionId !== void 0) latestUserPrompts.set(sessionId, input.prompt);
 }
-session = await joinSession({
-	commands: [createAutoCommand({
-		config,
-		getSession: () => session
-	}), createAutomodelCommand({
-		config,
-		getSession: () => session
-	})],
-	hooks: {
-		onSessionStart: async (input, invocation) => {
-			rememberInitialPrompt(input, invocation);
-		},
-		onUserPromptSubmitted: async (input, invocation) => {
-			rememberLatestUserPrompt(input, invocation);
-		},
-		onPreToolUse: createPreToolUseHandler({
-			config,
-			classifyShellSafetyWithModel,
-			getLatestUserPrompt: (sessionId) => latestUserPrompts.get(sessionId),
-			logger: { log: (...args) => session.log(...args) }
-		})
+function formatError(error) {
+	if (error instanceof Error) return error.message;
+	return String(error);
+}
+async function canRegisterExtension() {
+	try {
+		await getGitHubAuthToken();
+		return true;
+	} catch (error) {
+		console.warn("automode extension disabled: GitHub authentication unavailable. Set GH_TOKEN or GITHUB_TOKEN, or run `gh auth login` so `gh auth token` succeeds.", formatError(error));
+		return false;
 	}
-});
-session.on("session.shutdown", async () => {
-	latestUserPrompts.clear();
-	await closeClassifierClient();
-});
+}
+if (await canRegisterExtension()) {
+	const config = await loadConfig();
+	let session;
+	session = await joinSession({
+		commands: [createAutoCommand({
+			config,
+			getSession: () => session
+		}), createAutomodelCommand({
+			config,
+			getSession: () => session
+		})],
+		hooks: {
+			onSessionStart: async (input, invocation) => {
+				rememberInitialPrompt(input, invocation);
+			},
+			onUserPromptSubmitted: async (input, invocation) => {
+				rememberLatestUserPrompt(input, invocation);
+			},
+			onPreToolUse: createPreToolUseHandler({
+				config,
+				classifyShellSafetyWithModel,
+				getLatestUserPrompt: (sessionId) => latestUserPrompts.get(sessionId),
+				logger: { log: (...args) => session.log(...args) }
+			})
+		}
+	});
+	session.on("session.shutdown", async () => {
+		latestUserPrompts.clear();
+		await closeClassifierClient();
+	});
+}
 //#endregion

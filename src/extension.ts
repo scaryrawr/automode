@@ -3,10 +3,9 @@ import { classifyShellSafetyWithModel, closeClassifierClient } from "./classifie
 import { createAutoCommand } from "./commands/auto.js";
 import { createAutomodelCommand } from "./commands/automodel.js";
 import { loadConfig } from "./config.js";
+import { getGitHubAuthToken } from "./github-auth.js";
 import { createPreToolUseHandler } from "./pre-tool-policy.js";
 
-const config = await loadConfig();
-let session: Awaited<ReturnType<typeof joinSession>>;
 const latestUserPrompts = new Map<string, string>();
 
 type SessionPromptInput = {
@@ -37,30 +36,56 @@ function rememberLatestUserPrompt(input: UserPromptInput, invocation?: HookInvoc
   }
 }
 
-session = await joinSession({
-  commands: [
-    createAutoCommand({ config, getSession: () => session }),
-    createAutomodelCommand({ config, getSession: () => session }),
-  ],
-  hooks: {
-    onSessionStart: async (input, invocation) => {
-      rememberInitialPrompt(input, invocation);
-    },
-    onUserPromptSubmitted: async (input, invocation) => {
-      rememberLatestUserPrompt(input, invocation);
-    },
-    onPreToolUse: createPreToolUseHandler({
-      config,
-      classifyShellSafetyWithModel,
-      getLatestUserPrompt: (sessionId) => latestUserPrompts.get(sessionId),
-      logger: {
-        log: (...args) => session.log(...args),
-      },
-    }),
-  },
-});
+function formatError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
 
-session.on("session.shutdown", async (): Promise<void> => {
-  latestUserPrompts.clear();
-  await closeClassifierClient();
-});
+  return String(error);
+}
+
+async function canRegisterExtension(): Promise<boolean> {
+  try {
+    await getGitHubAuthToken();
+    return true;
+  } catch (error) {
+    console.warn(
+      "automode extension disabled: GitHub authentication unavailable. Set GH_TOKEN or GITHUB_TOKEN, or run `gh auth login` so `gh auth token` succeeds.",
+      formatError(error),
+    );
+    return false;
+  }
+}
+
+if (await canRegisterExtension()) {
+  const config = await loadConfig();
+  let session: Awaited<ReturnType<typeof joinSession>>;
+
+  session = await joinSession({
+    commands: [
+      createAutoCommand({ config, getSession: () => session }),
+      createAutomodelCommand({ config, getSession: () => session }),
+    ],
+    hooks: {
+      onSessionStart: async (input, invocation) => {
+        rememberInitialPrompt(input, invocation);
+      },
+      onUserPromptSubmitted: async (input, invocation) => {
+        rememberLatestUserPrompt(input, invocation);
+      },
+      onPreToolUse: createPreToolUseHandler({
+        config,
+        classifyShellSafetyWithModel,
+        getLatestUserPrompt: (sessionId) => latestUserPrompts.get(sessionId),
+        logger: {
+          log: (...args) => session.log(...args),
+        },
+      }),
+    },
+  });
+
+  session.on("session.shutdown", async (): Promise<void> => {
+    latestUserPrompts.clear();
+    await closeClassifierClient();
+  });
+}
