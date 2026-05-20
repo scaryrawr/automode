@@ -1,7 +1,8 @@
 import os from "node:os";
-import { createRequire } from "node:module";
 import path from "node:path";
 import { Language, Parser, type Node } from "web-tree-sitter";
+import treeSitterBashWasm from "virtual:automode/tree-sitter-bash-wasm";
+import webTreeSitterWasm from "virtual:automode/web-tree-sitter-wasm";
 import type { ShellPermissionCommand, ShellPermissionRequest } from "./types.js";
 
 export type ShellFastPathDecision =
@@ -135,8 +136,6 @@ const SHELL_REDIRECT_OPERATORS = new Set([
   ">&-",
 ]);
 
-const require = createRequire(import.meta.url);
-
 let parserPromise: Promise<Parser> | undefined;
 
 type ParsedShellCommandText = {
@@ -195,15 +194,9 @@ export async function createShellPermissionRequestFromCommandText(
 }
 
 async function createParser(): Promise<Parser> {
-  await Parser.init({
-    locateFile: () => require.resolve(["web-tree-sitter", "web-tree-sitter.wasm"].join("/")),
-  });
+  await Parser.init({ wasmBinary: webTreeSitterWasm });
 
-  const bashWasmPath = path.join(
-    path.dirname(require.resolve(["tree-sitter-bash", "package.json"].join("/"))),
-    "tree-sitter-bash.wasm",
-  );
-  const bash = await Language.load(bashWasmPath);
+  const bash = await Language.load(treeSitterBashWasm);
   const parser = new Parser();
   parser.setLanguage(bash);
   return parser;

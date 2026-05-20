@@ -10,5 +10,5 @@
     "types": ["node"],
     "useUnknownInCatchVariables": true
   },
-  "include": ["./src/**/*.ts", "./tests/**/*.ts", "./rolldown.config.ts"]
+  "include": ["./src/**/*.ts", "./tests/**/*.ts", "./rolldown.config.ts", "./vitest.config.ts"]
 }
