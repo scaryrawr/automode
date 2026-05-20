@@ -42,10 +42,13 @@ describe("listClassifierModels", () => {
     });
     mocks.fetch.mockResolvedValue(
       new Response(
-        JSON.stringify([
-          { id: "gpt-5-mini", name: "GPT-5 mini" },
-          { id: "claude-sonnet-4.5" },
-        ]),
+        JSON.stringify({
+          data: [
+            { id: "gpt-5-mini", name: "GPT-5 mini" },
+            { id: "claude-sonnet-4.5" },
+          ],
+          object: "list",
+        }),
       ),
     );
 
@@ -74,7 +77,7 @@ describe("listClassifierModels", () => {
 
   it("uses GH_TOKEN before shelling out for Copilot model listing", async () => {
     process.env.GH_TOKEN = "env-github-token";
-    mocks.fetch.mockResolvedValue(new Response(JSON.stringify([{ id: "gpt-5-mini" }])));
+    mocks.fetch.mockResolvedValue(new Response(JSON.stringify({ data: [{ id: "gpt-5-mini" }] })));
 
     const { listClassifierModels } = await loadClassifierModelsModule();
     await listClassifierModels();
@@ -90,7 +93,7 @@ describe("listClassifierModels", () => {
 
   it("uses GITHUB_TOKEN for Copilot model listing when GH_TOKEN is unset", async () => {
     process.env.GITHUB_TOKEN = "env-github-token";
-    mocks.fetch.mockResolvedValue(new Response(JSON.stringify([{ id: "gpt-5-mini" }])));
+    mocks.fetch.mockResolvedValue(new Response(JSON.stringify({ data: [{ id: "gpt-5-mini" }] })));
 
     const { listClassifierModels } = await loadClassifierModelsModule();
     await listClassifierModels();
@@ -107,7 +110,7 @@ describe("listClassifierModels", () => {
   it("prefers GH_TOKEN over GITHUB_TOKEN for Copilot model listing", async () => {
     process.env.GH_TOKEN = "env-gh-token";
     process.env.GITHUB_TOKEN = "env-github-token";
-    mocks.fetch.mockResolvedValue(new Response(JSON.stringify([{ id: "gpt-5-mini" }])));
+    mocks.fetch.mockResolvedValue(new Response(JSON.stringify({ data: [{ id: "gpt-5-mini" }] })));
 
     const { listClassifierModels } = await loadClassifierModelsModule();
     await listClassifierModels();

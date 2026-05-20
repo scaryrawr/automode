@@ -19,7 +19,9 @@ const ApiModelSchema = z.looseObject({
   name: z.string().min(1).optional(),
 });
 
-const ApiModelArraySchema = z.array(ApiModelSchema);
+const ApiModelListSchema = z.looseObject({
+  data: z.array(ApiModelSchema),
+});
 
 type ApiModel = z.infer<typeof ApiModelSchema>;
 
@@ -69,7 +71,7 @@ function getCopilotHeaders(token: string): Record<string, string> {
 }
 
 function extractApiModels(payload: unknown): ApiModel[] {
-  return ApiModelArraySchema.parse(payload);
+  return ApiModelListSchema.parse(payload).data;
 }
 
 function toModelInfo(model: ApiModel): ModelInfo {

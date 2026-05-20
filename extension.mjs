@@ -4085,7 +4085,7 @@ const ApiModelSchema = looseObject({
 	id: string().min(1),
 	name: string().min(1).optional()
 });
-const ApiModelArraySchema = array(ApiModelSchema);
+const ApiModelListSchema = looseObject({ data: array(ApiModelSchema) });
 function getRequiredEnv(name) {
 	const value = process.env[name]?.trim();
 	return value ? value : void 0;
@@ -4119,7 +4119,7 @@ function getCopilotHeaders(token) {
 	};
 }
 function extractApiModels(payload) {
-	return ApiModelArraySchema.parse(payload);
+	return ApiModelListSchema.parse(payload).data;
 }
 function toModelInfo(model) {
 	return {
