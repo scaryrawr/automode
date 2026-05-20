@@ -121,6 +121,11 @@ function getProviderHeaders(): Record<string, string> {
 }
 
 function getGitHubAuthToken(): Promise<string> {
+  const envToken = getRequiredEnv("GH_TOKEN") ?? getRequiredEnv("GITHUB_TOKEN");
+  if (envToken) {
+    return Promise.resolve(envToken);
+  }
+
   return new Promise((resolve, reject) => {
     execFile(
       "gh",

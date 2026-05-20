@@ -27,6 +27,8 @@ function clearProviderEnv() {
   delete process.env.COPILOT_PROVIDER_MODEL_ID;
   delete process.env.COPILOT_PROVIDER_TYPE;
   delete process.env.COPILOT_PROVIDER_WIRE_MODEL;
+  delete process.env.GH_TOKEN;
+  delete process.env.GITHUB_TOKEN;
 }
 
 describe("listClassifierModels", () => {
@@ -163,5 +165,54 @@ describe("listClassifierModels", () => {
       },
     });
     expect(models.map((model) => model.id)).toEqual(["gpt-5-mini", "claude-sonnet-4.5"]);
+  });
+
+  it("uses GH_TOKEN before shelling out for Copilot model listing", async () => {
+    process.env.GH_TOKEN = "env-github-token";
+    mocks.fetch.mockResolvedValue(new Response(JSON.stringify([{ id: "gpt-5-mini" }])));
+
+    const { listClassifierModels } = await loadClassifierModelsModule();
+    await listClassifierModels();
+
+    expect(mocks.execFile).not.toHaveBeenCalled();
+    expect(mocks.fetch).toHaveBeenCalledWith("https://api.githubcopilot.com/models", {
+      headers: {
+        Accept: "application/json",
+        Authorization: "Bearer env-github-token",
+      },
+    });
+  });
+
+  it("uses GITHUB_TOKEN for Copilot model listing when GH_TOKEN is unset", async () => {
+    process.env.GITHUB_TOKEN = "env-github-token";
+    mocks.fetch.mockResolvedValue(new Response(JSON.stringify([{ id: "gpt-5-mini" }])));
+
+    const { listClassifierModels } = await loadClassifierModelsModule();
+    await listClassifierModels();
+
+    expect(mocks.execFile).not.toHaveBeenCalled();
+    expect(mocks.fetch).toHaveBeenCalledWith("https://api.githubcopilot.com/models", {
+      headers: {
+        Accept: "application/json",
+        Authorization: "Bearer env-github-token",
+      },
+    });
+  });
+
+  it("prefers GH_TOKEN over GITHUB_TOKEN for Copilot model listing", async () => {
+    process.env.GH_TOKEN = "env-gh-token";
+    process.env.GITHUB_TOKEN = "env-github-token";
+    mocks.fetch.mockResolvedValue(new Response(JSON.stringify([{ id: "gpt-5-mini" }])));
+
+    const { listClassifierModels } = await loadClassifierModelsModule();
+    await listClassifierModels();
+
+    expect(mocks.execFile).not.toHaveBeenCalled();
+    expect(mocks.fetch).toHaveBeenCalledWith("https://api.githubcopilot.com/models", {
+      headers: {
+        Accept: "application/json",
+        Authorization: "Bearer env-gh-token",
+      },
+    });
   });
 });

@@ -4148,6 +4148,8 @@ function getProviderHeaders() {
 	return headers;
 }
 function getGitHubAuthToken() {
+	const envToken = getRequiredEnv("GH_TOKEN") ?? getRequiredEnv("GITHUB_TOKEN");
+	if (envToken) return Promise.resolve(envToken);
 	return new Promise((resolve, reject) => {
 		execFile("gh", ["auth", "token"], {
 			encoding: "utf8",
