@@ -7,7 +7,6 @@ const mocks = vi.hoisted(() => {
   const loadConfig = vi.fn();
   const classifyShellSafetyWithModel = vi.fn();
   const closeClassifierClient = vi.fn();
-  const getClassifierProviderContext = vi.fn();
   const listClassifierModels = vi.fn();
   const log = vi.fn();
   const on = vi.fn();
@@ -16,7 +15,6 @@ const mocks = vi.hoisted(() => {
   return {
     classifyShellSafetyWithModel,
     closeClassifierClient,
-    getClassifierProviderContext,
     joinSession,
     listClassifierModels,
     loadConfig,
@@ -36,7 +34,6 @@ vi.mock("../src/classifier.js", () => ({
 }));
 
 vi.mock("../src/classifier-models.js", () => ({
-  getClassifierProviderContext: mocks.getClassifierProviderContext,
   listClassifierModels: mocks.listClassifierModels,
 }));
 
@@ -116,12 +113,6 @@ describe("extension pre-tool hook", () => {
     mocks.classifyShellSafetyWithModel.mockResolvedValue({
       classification: "allow",
       reason: "non-destructive command",
-    });
-    mocks.getClassifierProviderContext.mockReturnValue({
-      isCustomProvider: false,
-      providerType: "openai",
-      modelOptions: [],
-      defaultModel: undefined,
     });
     mocks.listClassifierModels.mockResolvedValue([
       { id: "gpt-5-mini", name: "GPT-5 mini", capabilities: {} },
@@ -661,72 +652,6 @@ describe("extension pre-tool hook", () => {
       ["claude-sonnet-4.5", "gpt-5-mini"],
     );
     expect(config.classifierModel).toBe("gpt-5-mini");
-  });
-
-  it("shows provider fallback model when automodel status runs in provider mode", async () => {
-    mocks.getClassifierProviderContext.mockReturnValue({
-      isCustomProvider: true,
-      providerType: "openai",
-      providerHost: "localhost:11434",
-      modelOptions: [{ id: "deepseek-coder-v2:16b", source: "COPILOT_MODEL" }],
-      defaultModel: { id: "deepseek-coder-v2:16b", source: "COPILOT_MODEL" },
-    });
-
-    await loadExtensionModule();
-    const handleAutomodel = getCommandHandler("automodel");
-
-    await handleAutomodel({ args: "status" });
-
-    expect(mocks.log).toHaveBeenCalledWith(
-      "auto mode classifier model: deepseek-coder-v2:16b (from COPILOT_MODEL); provider: custom openai provider at localhost:11434.",
-    );
-  });
-
-  it("describes provider fallback when automodel reset runs in provider mode", async () => {
-    config.classifierModel = "gpt-5-mini";
-    mocks.getClassifierProviderContext.mockReturnValue({
-      isCustomProvider: true,
-      providerType: "openai",
-      providerHost: "localhost:11434",
-      modelOptions: [{ id: "deepseek-coder-v2:16b", source: "COPILOT_MODEL" }],
-      defaultModel: { id: "deepseek-coder-v2:16b", source: "COPILOT_MODEL" },
-    });
-
-    await loadExtensionModule();
-    const handleAutomodel = getCommandHandler("automodel");
-
-    await handleAutomodel({ args: "reset" });
-
-    expect(config.classifierModel).toBeUndefined();
-    expect(mocks.log).toHaveBeenCalledWith(
-      "auto mode classifier model reset; provider fallback is deepseek-coder-v2:16b (from COPILOT_MODEL).",
-    );
-  });
-
-  it("labels the interactive automodel picker with the active provider", async () => {
-    mocks.getClassifierProviderContext.mockReturnValue({
-      isCustomProvider: true,
-      providerType: "openai",
-      providerHost: "localhost:11434",
-      modelOptions: [{ id: "deepseek-coder-v2:16b", source: "COPILOT_MODEL" }],
-      defaultModel: { id: "deepseek-coder-v2:16b", source: "COPILOT_MODEL" },
-    });
-    mocks.listClassifierModels.mockResolvedValue([
-      { id: "deepseek-coder-v2:16b", name: "deepseek-coder-v2:16b", capabilities: {} },
-      { id: "llama3.2", name: "llama3.2", capabilities: {} },
-    ]);
-    mocks.select.mockResolvedValue("llama3.2");
-
-    await loadExtensionModule();
-    const handleAutomodel = getCommandHandler("automodel");
-
-    await handleAutomodel({ args: "" });
-
-    expect(mocks.select).toHaveBeenCalledWith(
-      "Select auto mode classifier model from custom openai provider at localhost:11434 (current: deepseek-coder-v2:16b (from COPILOT_MODEL))",
-      ["deepseek-coder-v2:16b", "llama3.2"],
-    );
-    expect(config.classifierModel).toBe("llama3.2");
   });
 
   it("keeps the classifier model unchanged when interactive model listing fails", async () => {

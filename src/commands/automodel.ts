@@ -1,5 +1,5 @@
-import { getClassifierProviderContext, listClassifierModels } from "../classifier-models.js";
-import { formatClassifierModel, formatProviderContext } from "./model-formatting.js";
+import { listClassifierModels } from "../classifier-models.js";
+import { formatClassifierModel } from "./model-formatting.js";
 import type { CommandFactoryOptions, ExtensionCommand } from "./types.js";
 
 function getErrorMessage(error: unknown): string {
@@ -19,21 +19,15 @@ export function createAutomodelCommand({
       const session = getSession();
 
       if (action === "show" || action === "status") {
-        const providerContext = getClassifierProviderContext();
         await session.log(
-          `auto mode classifier model: ${formatClassifierModel(config.classifierModel, providerContext)}; provider: ${formatProviderContext(providerContext)}.`,
+          `auto mode classifier model: ${formatClassifierModel(config.classifierModel)}.`,
         );
         return;
       }
 
       if (action === "default" || action === "reset" || action === "clear") {
         config.classifierModel = undefined;
-        const providerContext = getClassifierProviderContext();
-        await session.log(
-          providerContext.isCustomProvider
-            ? `auto mode classifier model reset; provider fallback is ${formatClassifierModel(undefined, providerContext)}.`
-            : "auto mode classifier model reset to Copilot default.",
-        );
+        await session.log("auto mode classifier model reset to Copilot default.");
         return;
       }
 
@@ -43,12 +37,9 @@ export function createAutomodelCommand({
         return;
       }
 
-      const providerContext = getClassifierProviderContext();
       if (!session.capabilities.ui?.elicitation) {
         await session.log(
-          providerContext.isCustomProvider
-            ? "auto mode classifier model unchanged. Use /automodel <model-id> to set it, or /automodel reset to use the configured provider fallback."
-            : "auto mode classifier model unchanged. Use /automodel <model-id> to set it, or /automodel reset to use the Copilot default.",
+          "auto mode classifier model unchanged. Use /automodel <model-id> to set it, or /automodel reset to use the Copilot default.",
         );
         return;
       }
@@ -68,15 +59,11 @@ export function createAutomodelCommand({
       );
 
       if (modelOptions.length === 0) {
-        await session.log(
-          `auto mode classifier model unchanged. No ${formatProviderContext(providerContext)} models are available.`,
-        );
+        await session.log("auto mode classifier model unchanged. No Copilot models are available.");
         return;
       }
 
-      const selectionPrompt = providerContext.isCustomProvider
-        ? `Select auto mode classifier model from ${formatProviderContext(providerContext)} (current: ${formatClassifierModel(config.classifierModel, providerContext)})`
-        : `Select auto mode classifier model (current: ${formatClassifierModel(config.classifierModel, providerContext)})`;
+      const selectionPrompt = `Select auto mode classifier model (current: ${formatClassifierModel(config.classifierModel)})`;
       const selectedModel = await session.ui.select(selectionPrompt, modelOptions);
 
       if (!selectedModel) {

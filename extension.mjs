@@ -4086,66 +4086,9 @@ const ApiModelSchema = looseObject({
 	name: string().min(1).optional()
 });
 const ApiModelArraySchema = array(ApiModelSchema);
-const ApiModelDataResponseSchema = looseObject({ data: ApiModelArraySchema });
-const ApiModelModelsResponseSchema = looseObject({ models: ApiModelArraySchema });
 function getRequiredEnv(name) {
 	const value = process.env[name]?.trim();
 	return value ? value : void 0;
-}
-function getProviderHost(baseUrl) {
-	if (!baseUrl) return;
-	try {
-		return new URL(baseUrl).host;
-	} catch {
-		return;
-	}
-}
-function getProviderModelOptions() {
-	const candidates = [{
-		id: getRequiredEnv("COPILOT_PROVIDER_MODEL_ID") ?? "",
-		source: "COPILOT_PROVIDER_MODEL_ID"
-	}, {
-		id: getRequiredEnv("COPILOT_MODEL") ?? "",
-		source: "COPILOT_MODEL"
-	}];
-	const seenModelIds = /* @__PURE__ */ new Set();
-	return candidates.filter((candidate) => {
-		if (!candidate.id || seenModelIds.has(candidate.id)) return false;
-		seenModelIds.add(candidate.id);
-		return true;
-	});
-}
-function getClassifierProviderContext() {
-	const providerBaseUrl = getRequiredEnv("COPILOT_PROVIDER_BASE_URL");
-	const modelOptions = getProviderModelOptions();
-	return {
-		isCustomProvider: Boolean(providerBaseUrl),
-		providerType: getRequiredEnv("COPILOT_PROVIDER_TYPE") ?? "openai",
-		providerHost: getProviderHost(providerBaseUrl),
-		modelOptions,
-		defaultModel: modelOptions[0]
-	};
-}
-function getProviderModelsUrl(baseUrl) {
-	const url = new URL(baseUrl);
-	const path = url.pathname.replace(/\/+$/, "");
-	url.pathname = path.endsWith("/v1") ? `${path}/models` : `${path}/v1/models`;
-	url.search = "";
-	url.hash = "";
-	return url.toString();
-}
-function getProviderHeaders() {
-	const headers = { Accept: "application/json" };
-	const bearerToken = getRequiredEnv("COPILOT_PROVIDER_BEARER_TOKEN");
-	const apiKey = getRequiredEnv("COPILOT_PROVIDER_API_KEY");
-	const providerType = getRequiredEnv("COPILOT_PROVIDER_TYPE") ?? "openai";
-	if (bearerToken) headers.Authorization = `Bearer ${bearerToken}`;
-	else if (apiKey && providerType === "azure") headers["api-key"] = apiKey;
-	else if (apiKey && providerType === "anthropic") {
-		headers["x-api-key"] = apiKey;
-		headers["anthropic-version"] = "2023-06-01";
-	} else if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
-	return headers;
 }
 function getGitHubAuthToken() {
 	const envToken = getRequiredEnv("GH_TOKEN") ?? getRequiredEnv("GITHUB_TOKEN");
@@ -4176,11 +4119,7 @@ function getCopilotHeaders(token) {
 	};
 }
 function extractApiModels(payload) {
-	const arrayPayload = ApiModelArraySchema.safeParse(payload);
-	if (arrayPayload.success) return arrayPayload.data;
-	const dataPayload = ApiModelDataResponseSchema.safeParse(payload);
-	if (dataPayload.success) return dataPayload.data.data;
-	return ApiModelModelsResponseSchema.parse(payload).models;
+	return ApiModelArraySchema.parse(payload);
 }
 function toModelInfo(model) {
 	return {
@@ -4189,35 +4128,12 @@ function toModelInfo(model) {
 		capabilities: DEFAULT_MODEL_CAPABILITIES
 	};
 }
-function mergeModelInfos(models, modelOptions) {
-	const mergedModels = [...models];
-	const seenModelIds = new Set(models.map((model) => model.id));
-	for (const modelOption of modelOptions) if (!seenModelIds.has(modelOption.id)) {
-		mergedModels.push(toModelInfo({
-			id: modelOption.id,
-			name: modelOption.id
-		}));
-		seenModelIds.add(modelOption.id);
-	}
-	return mergedModels;
-}
 async function fetchModels(url, headers) {
 	const response = await fetch(url, { headers });
 	if (!response.ok) throw new Error(`Failed to list models from ${url}: ${response.status} ${response.statusText}`);
 	return extractApiModels(await response.json()).map(toModelInfo);
 }
 async function listClassifierModels() {
-	const providerBaseUrl = getRequiredEnv("COPILOT_PROVIDER_BASE_URL");
-	if (providerBaseUrl) {
-		const providerModelOptions = getProviderModelOptions();
-		try {
-			return mergeModelInfos(await fetchModels(getProviderModelsUrl(providerBaseUrl), getProviderHeaders()), providerModelOptions);
-		} catch (error) {
-			const providerModelFallbacks = mergeModelInfos([], providerModelOptions);
-			if (providerModelFallbacks.length > 0) return providerModelFallbacks;
-			throw error;
-		}
-	}
 	return fetchModels(COPILOT_MODELS_URL, getCopilotHeaders(await getGitHubAuthToken()));
 }
 function normalizeClassifierModel(model) {
@@ -4225,12 +4141,7 @@ function normalizeClassifierModel(model) {
 	return normalizedModel ? normalizedModel : void 0;
 }
 function resolveClassifierModel(model) {
-	const classifierModel = normalizeClassifierModel(model);
-	if (classifierModel) return classifierModel;
-	const providerContext = getClassifierProviderContext();
-	if (!providerContext.isCustomProvider) return;
-	if (providerContext.defaultModel) return providerContext.defaultModel.id;
-	throw new Error("Custom provider mode requires a classifier model. Set COPILOT_MODEL, COPILOT_PROVIDER_MODEL_ID, or run /automodel <model-id>.");
+	return normalizeClassifierModel(model);
 }
 //#endregion
 //#region src/classifier.ts
@@ -4391,18 +4302,8 @@ async function closeClassifierClient() {
 }
 //#endregion
 //#region src/commands/model-formatting.ts
-function formatProviderContext(providerContext) {
-	if (!providerContext.isCustomProvider) return "Copilot";
-	const provider = `custom ${providerContext.providerType} provider`;
-	return providerContext.providerHost ? `${provider} at ${providerContext.providerHost}` : provider;
-}
-function formatClassifierModel(model, providerContext = getClassifierProviderContext()) {
-	if (model) return model;
-	if (providerContext.isCustomProvider) {
-		const defaultModel = providerContext.defaultModel;
-		return defaultModel ? `${defaultModel.id} (from ${defaultModel.source})` : "custom provider default (not configured)";
-	}
-	return "Copilot default";
+function formatClassifierModel(model) {
+	return model ? model : "Copilot default";
 }
 //#endregion
 //#region src/commands/auto.ts
@@ -4444,14 +4345,12 @@ function createAutomodelCommand({ config, getSession }) {
 			const action = arg.toLowerCase();
 			const session = getSession();
 			if (action === "show" || action === "status") {
-				const providerContext = getClassifierProviderContext();
-				await session.log(`auto mode classifier model: ${formatClassifierModel(config.classifierModel, providerContext)}; provider: ${formatProviderContext(providerContext)}.`);
+				await session.log(`auto mode classifier model: ${formatClassifierModel(config.classifierModel)}.`);
 				return;
 			}
 			if (action === "default" || action === "reset" || action === "clear") {
 				config.classifierModel = void 0;
-				const providerContext = getClassifierProviderContext();
-				await session.log(providerContext.isCustomProvider ? `auto mode classifier model reset; provider fallback is ${formatClassifierModel(void 0, providerContext)}.` : "auto mode classifier model reset to Copilot default.");
+				await session.log("auto mode classifier model reset to Copilot default.");
 				return;
 			}
 			if (arg) {
@@ -4459,9 +4358,8 @@ function createAutomodelCommand({ config, getSession }) {
 				await session.log(`auto mode classifier model set to ${arg}.`);
 				return;
 			}
-			const providerContext = getClassifierProviderContext();
 			if (!session.capabilities.ui?.elicitation) {
-				await session.log(providerContext.isCustomProvider ? "auto mode classifier model unchanged. Use /automodel <model-id> to set it, or /automodel reset to use the configured provider fallback." : "auto mode classifier model unchanged. Use /automodel <model-id> to set it, or /automodel reset to use the Copilot default.");
+				await session.log("auto mode classifier model unchanged. Use /automodel <model-id> to set it, or /automodel reset to use the Copilot default.");
 				return;
 			}
 			let models;
@@ -4473,10 +4371,10 @@ function createAutomodelCommand({ config, getSession }) {
 			}
 			const modelOptions = [...new Set(models.map((model) => model.id))].sort((a, b) => a.localeCompare(b));
 			if (modelOptions.length === 0) {
-				await session.log(`auto mode classifier model unchanged. No ${formatProviderContext(providerContext)} models are available.`);
+				await session.log("auto mode classifier model unchanged. No Copilot models are available.");
 				return;
 			}
-			const selectionPrompt = providerContext.isCustomProvider ? `Select auto mode classifier model from ${formatProviderContext(providerContext)} (current: ${formatClassifierModel(config.classifierModel, providerContext)})` : `Select auto mode classifier model (current: ${formatClassifierModel(config.classifierModel, providerContext)})`;
+			const selectionPrompt = `Select auto mode classifier model (current: ${formatClassifierModel(config.classifierModel)})`;
 			const selectedModel = await session.ui.select(selectionPrompt, modelOptions);
 			if (!selectedModel) {
 				await session.log("auto mode classifier model unchanged.");

@@ -1,8 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
-  const execFile = vi.fn();
-  const fetch = vi.fn();
   const createSession = vi.fn();
   const deleteSession = vi.fn();
   const stop = vi.fn();
@@ -23,16 +21,10 @@ const mocks = vi.hoisted(() => {
     createSession,
     deleteSession,
     disconnect,
-    execFile,
-    fetch,
     sendAndWait,
     stop,
   };
 });
-
-vi.mock("node:child_process", () => ({
-  execFile: mocks.execFile,
-}));
 
 vi.mock("@github/copilot-sdk", () => ({
   CopilotClient: mocks.CopilotClient,
@@ -42,16 +34,6 @@ vi.mock("@github/copilot-sdk", () => ({
 async function loadClassifierModule() {
   vi.resetModules();
   return import("../src/classifier.js");
-}
-
-function clearProviderEnv() {
-  delete process.env.COPILOT_MODEL;
-  delete process.env.COPILOT_PROVIDER_API_KEY;
-  delete process.env.COPILOT_PROVIDER_BASE_URL;
-  delete process.env.COPILOT_PROVIDER_BEARER_TOKEN;
-  delete process.env.COPILOT_PROVIDER_MODEL_ID;
-  delete process.env.COPILOT_PROVIDER_TYPE;
-  delete process.env.COPILOT_PROVIDER_WIRE_MODEL;
 }
 
 function getTaggedSection(prompt: string, tagName: string): string | null {
@@ -75,8 +57,6 @@ function countOccurrences(text: string, search: string): number {
 describe("classifyShellSafetyWithModel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.stubGlobal("fetch", mocks.fetch);
-    clearProviderEnv();
 
     mocks.CopilotClient.mockImplementation(function MockCopilotClient() {
       return {
@@ -94,11 +74,6 @@ describe("classifyShellSafetyWithModel", () => {
     mocks.disconnect.mockResolvedValue(undefined);
     mocks.sendAndWait.mockResolvedValue(undefined);
     mocks.stop.mockResolvedValue([]);
-  });
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
-    clearProviderEnv();
   });
 
   it("deletes the nested classifier session after a successful classification", async () => {
@@ -246,47 +221,6 @@ describe("classifyShellSafetyWithModel", () => {
       clientName: "automode-classifier",
       model: "gpt-5-mini",
     });
-  });
-
-  it("uses provider model env when no classifier model is configured", async () => {
-    process.env.COPILOT_PROVIDER_BASE_URL = "http://localhost:11434/v1";
-    process.env.COPILOT_MODEL = "provider-model";
-    process.env.COPILOT_PROVIDER_MODEL_ID = "gpt-5.4";
-
-    const { classifyShellSafetyWithModel } = await loadClassifierModule();
-
-    await classifyShellSafetyWithModel("git status");
-
-    const [sessionConfig] = mocks.createSession.mock.calls[0] ?? [];
-    expect(sessionConfig).toMatchObject({
-      model: "gpt-5.4",
-    });
-  });
-
-  it("prefers a configured classifier model over provider model env", async () => {
-    process.env.COPILOT_PROVIDER_BASE_URL = "http://localhost:11434/v1";
-    process.env.COPILOT_MODEL = "provider-model";
-    process.env.COPILOT_PROVIDER_MODEL_ID = "gpt-5.4";
-
-    const { classifyShellSafetyWithModel } = await loadClassifierModule();
-
-    await classifyShellSafetyWithModel("git status", "custom-classifier");
-
-    const [sessionConfig] = mocks.createSession.mock.calls[0] ?? [];
-    expect(sessionConfig).toMatchObject({
-      model: "custom-classifier",
-    });
-  });
-
-  it("fails clearly when provider mode has no classifier model", async () => {
-    process.env.COPILOT_PROVIDER_BASE_URL = "http://localhost:11434/v1";
-
-    const { classifyShellSafetyWithModel } = await loadClassifierModule();
-
-    await expect(classifyShellSafetyWithModel("git status")).rejects.toThrow(
-      "Custom provider mode requires a classifier model",
-    );
-    expect(mocks.createSession).not.toHaveBeenCalled();
   });
 
   it("deletes the nested classifier session when classification fails", async () => {
