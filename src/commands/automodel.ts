@@ -1,10 +1,7 @@
 import { listClassifierModels } from "../classifier-models.js";
+import { getErrorMessage } from "../errors.js";
 import { formatClassifierModel } from "./model-formatting.js";
 import type { CommandFactoryOptions, ExtensionCommand } from "./types.js";
-
-function getErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
 
 export function createAutomodelCommand({
   config,

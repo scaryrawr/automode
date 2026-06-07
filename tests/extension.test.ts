@@ -1,5 +1,4 @@
 import type { CommandContext } from "@github/copilot-sdk";
-import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
@@ -53,9 +52,12 @@ async function loadExtensionModule() {
   return import("../src/extension.js");
 }
 
-function getPreToolHandler() {
+function getPermissionHandler() {
   const [config] = mocks.joinSession.mock.calls.at(-1) ?? [];
-  return config.hooks.onPreToolUse as (request: unknown) => Promise<unknown>;
+  return config.onPermissionRequest as (
+    request: unknown,
+    invocation?: { sessionId: string },
+  ) => Promise<unknown>;
 }
 
 function getHooks() {
@@ -63,7 +65,7 @@ function getHooks() {
   return config.hooks as {
     onSessionStart: (request: unknown, invocation?: { sessionId: string }) => Promise<unknown>;
     onUserPromptSubmitted: (request: unknown, invocation?: { sessionId: string }) => Promise<unknown>;
-    onPreToolUse: (request: unknown, invocation?: { sessionId: string }) => Promise<unknown>;
+    onPreToolUse?: (request: unknown, invocation?: { sessionId: string }) => Promise<unknown>;
   };
 }
 
@@ -75,41 +77,27 @@ function getCommandHandler(commandName: string) {
   return command.handler as (context: Pick<CommandContext, "args">) => Promise<void>;
 }
 
-describe("extension pre-tool hook", () => {
+describe("extension permission hook", () => {
   let config: { autoMode: boolean; classifierModel?: string };
 
-  function createShellToolInput(
-    command: string,
-    description: string,
-    cwd = "/workspace",
-    sessionId = "test-session",
-  ) {
+  function createShellPermissionRequest(command: string, intention: string) {
+    const [identifier = ""] = command.trim().split(/\s+/, 1);
     return {
-      sessionId,
-      toolName: "bash",
-      toolArgs: JSON.stringify({
-        command,
-        description,
-      }),
-      timestamp: 1,
-      cwd,
+      kind: "shell" as const,
+      fullCommandText: command,
+      intention,
+      commands: [{ identifier, readOnly: false }],
+      possiblePaths: [],
+      possibleUrls: [],
+      hasWriteFileRedirection: false,
+      canOfferSessionApproval: false,
+      warning: undefined,
     };
   }
 
   const shellCommand = "npm test -- --runInBand";
-  const shellDescription = "Run the test suite";
-  const shellToolInput = createShellToolInput(shellCommand, shellDescription);
-
-  const objectShellToolInput = {
-    sessionId: "test-session",
-    toolName: "bash",
-    toolArgs: {
-      command: shellCommand,
-      description: shellDescription,
-    },
-    timestamp: 1,
-    cwd: "/workspace",
-  };
+  const shellIntention = "Run the test suite";
+  const shellRequest = createShellPermissionRequest(shellCommand, shellIntention);
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -137,12 +125,12 @@ describe("extension pre-tool hook", () => {
     mocks.closeClassifierClient.mockResolvedValue(undefined);
   });
 
-  it("registers a pre-tool hook instead of a permission request handler", async () => {
+  it("registers a permission request handler instead of a pre-tool hook", async () => {
     await loadExtensionModule();
 
     const [joinConfig] = mocks.joinSession.mock.calls.at(-1) ?? [];
-    expect(joinConfig.onPermissionRequest).toBeUndefined();
-    expect(joinConfig.hooks.onPreToolUse).toBeTypeOf("function");
+    expect(joinConfig.onPermissionRequest).toBeTypeOf("function");
+    expect(joinConfig.hooks.onPreToolUse).toBeUndefined();
     expect(joinConfig.hooks.onSessionStart).toBeTypeOf("function");
     expect(joinConfig.hooks.onUserPromptSubmitted).toBeTypeOf("function");
   });
@@ -169,26 +157,30 @@ describe("extension pre-tool hook", () => {
     config.autoMode = false;
 
     await loadExtensionModule();
-    const onPreToolUse = getPreToolHandler();
+    const onPermissionRequest = getPermissionHandler();
 
-    await expect(onPreToolUse(shellToolInput)).resolves.toBeUndefined();
+    await expect(
+      onPermissionRequest(shellRequest, { sessionId: "test-session" }),
+    ).resolves.toEqual({ kind: "no-result" });
     expect(mocks.classifyShellSafetyWithModel).not.toHaveBeenCalled();
   });
 
   it("passes command and intention to the classifier and approves allowed commands", async () => {
     await loadExtensionModule();
-    const onPreToolUse = getPreToolHandler();
+    const onPermissionRequest = getPermissionHandler();
 
-    await expect(onPreToolUse(shellToolInput)).resolves.toEqual({ permissionDecision: "allow" });
+    await expect(
+      onPermissionRequest(shellRequest, { sessionId: "test-session" }),
+    ).resolves.toEqual({ kind: "approved" });
 
     expect(mocks.classifyShellSafetyWithModel).toHaveBeenCalledTimes(1);
     expect(mocks.classifyShellSafetyWithModel).toHaveBeenCalledWith(
       expect.objectContaining({
         command: shellCommand,
-        intention: shellDescription,
+        intention: shellIntention,
         shellRequest: expect.objectContaining({
           fullCommandText: shellCommand,
-          intention: shellDescription,
+          intention: shellIntention,
           commands: [
             {
               identifier: "npm",
@@ -196,42 +188,34 @@ describe("extension pre-tool hook", () => {
               args: ["test", "--", "--runInBand"],
             },
           ],
-          cwd: "/workspace",
         }),
       }),
       undefined,
     );
-  });
-
-  it("accepts object shell arguments for compatibility with direct hook tests", async () => {
-    await loadExtensionModule();
-    const onPreToolUse = getPreToolHandler();
-
-    await expect(onPreToolUse(objectShellToolInput)).resolves.toEqual({
-      permissionDecision: "allow",
+    expect(mocks.log).toHaveBeenCalledWith("classifier running", {
+      ephemeral: true,
+      level: "info",
     });
-
-    expect(mocks.classifyShellSafetyWithModel).toHaveBeenCalledWith(
-      expect.objectContaining({
-        command: shellCommand,
-        intention: shellDescription,
-      }),
-      undefined,
-    );
+    expect(mocks.log).toHaveBeenCalledWith("classifier result: allow (non-destructive command)", {
+      ephemeral: true,
+      level: "info",
+    });
   });
 
   it("passes the configured classifier model to shell classifications", async () => {
     config.classifierModel = "gpt-5-mini";
 
     await loadExtensionModule();
-    const onPreToolUse = getPreToolHandler();
+    const onPermissionRequest = getPermissionHandler();
 
-    await expect(onPreToolUse(shellToolInput)).resolves.toEqual({ permissionDecision: "allow" });
+    await expect(
+      onPermissionRequest(shellRequest, { sessionId: "test-session" }),
+    ).resolves.toEqual({ kind: "approved" });
 
     expect(mocks.classifyShellSafetyWithModel).toHaveBeenCalledWith(
       expect.objectContaining({
         command: shellCommand,
-        intention: shellDescription,
+        intention: shellIntention,
       }),
       "gpt-5-mini",
     );
@@ -239,16 +223,18 @@ describe("extension pre-tool hook", () => {
 
   it("uses classifier model changes made after registration", async () => {
     await loadExtensionModule();
-    const onPreToolUse = getPreToolHandler();
+    const onPermissionRequest = getPermissionHandler();
 
     config.classifierModel = "claude-sonnet-4.5";
 
-    await expect(onPreToolUse(shellToolInput)).resolves.toEqual({ permissionDecision: "allow" });
+    await expect(
+      onPermissionRequest(shellRequest, { sessionId: "test-session" }),
+    ).resolves.toEqual({ kind: "approved" });
 
     expect(mocks.classifyShellSafetyWithModel).toHaveBeenCalledWith(
       expect.objectContaining({
         command: shellCommand,
-        intention: shellDescription,
+        intention: shellIntention,
       }),
       "claude-sonnet-4.5",
     );
@@ -257,27 +243,28 @@ describe("extension pre-tool hook", () => {
   it("passes the latest submitted user prompt to shell classifications", async () => {
     await loadExtensionModule();
     const hooks = getHooks();
+    const onPermissionRequest = getPermissionHandler();
 
     await expect(
-      hooks.onUserPromptSubmitted({
-        prompt: "Please run the test suite",
-        timestamp: 1,
-        cwd: "/workspace",
-      }, { sessionId: "test-session" }),
-    ).resolves.toBeUndefined();
-    await expect(
-      hooks.onPreToolUse(
-        { ...shellToolInput, sessionId: undefined },
+      hooks.onUserPromptSubmitted(
+        {
+          prompt: "Please run the test suite",
+          timestamp: 1,
+          cwd: "/workspace",
+        },
         { sessionId: "test-session" },
       ),
+    ).resolves.toBeUndefined();
+    await expect(
+      onPermissionRequest(shellRequest, { sessionId: "test-session" }),
     ).resolves.toEqual({
-      permissionDecision: "allow",
+      kind: "approved",
     });
 
     expect(mocks.classifyShellSafetyWithModel).toHaveBeenCalledWith(
       expect.objectContaining({
         command: shellCommand,
-        intention: shellDescription,
+        intention: shellIntention,
         latestUserPrompt: "Please run the test suite",
       }),
       undefined,
@@ -287,22 +274,23 @@ describe("extension pre-tool hook", () => {
   it("uses the session initial prompt before any submitted user prompt", async () => {
     await loadExtensionModule();
     const hooks = getHooks();
+    const onPermissionRequest = getPermissionHandler();
 
     await expect(
-      hooks.onSessionStart({
-        source: "startup",
-        initialPrompt: "Run the focused tests",
-        timestamp: 1,
-        cwd: "/workspace",
-      }, { sessionId: "test-session" }),
-    ).resolves.toBeUndefined();
-    await expect(
-      hooks.onPreToolUse(
-        { ...shellToolInput, sessionId: undefined },
+      hooks.onSessionStart(
+        {
+          source: "startup",
+          initialPrompt: "Run the focused tests",
+          timestamp: 1,
+          cwd: "/workspace",
+        },
         { sessionId: "test-session" },
       ),
+    ).resolves.toBeUndefined();
+    await expect(
+      onPermissionRequest(shellRequest, { sessionId: "test-session" }),
     ).resolves.toEqual({
-      permissionDecision: "allow",
+      kind: "approved",
     });
 
     expect(mocks.classifyShellSafetyWithModel).toHaveBeenCalledWith(
@@ -316,19 +304,20 @@ describe("extension pre-tool hook", () => {
   it("keeps latest user prompts isolated by session id", async () => {
     await loadExtensionModule();
     const hooks = getHooks();
+    const onPermissionRequest = getPermissionHandler();
 
-    await hooks.onUserPromptSubmitted({
-      prompt: "Publish to main",
-      timestamp: 1,
-      cwd: "/workspace",
-    }, { sessionId: "other-session" });
+    await hooks.onUserPromptSubmitted(
+      {
+        prompt: "Publish to main",
+        timestamp: 1,
+        cwd: "/workspace",
+      },
+      { sessionId: "other-session" },
+    );
     await expect(
-      hooks.onPreToolUse(
-        { ...shellToolInput, sessionId: undefined },
-        { sessionId: "test-session" },
-      ),
+      onPermissionRequest(shellRequest, { sessionId: "test-session" }),
     ).resolves.toEqual({
-      permissionDecision: "allow",
+      kind: "approved",
     });
 
     const [classifierInput] = mocks.classifyShellSafetyWithModel.mock.calls[0] ?? [];
@@ -341,11 +330,14 @@ describe("extension pre-tool hook", () => {
     });
 
     await loadExtensionModule();
-    const onPreToolUse = getPreToolHandler();
+    const onPermissionRequest = getPermissionHandler();
 
-    await expect(onPreToolUse(shellToolInput)).resolves.toEqual({
-      permissionDecision: "deny",
-      permissionDecisionReason: "Blocked by safety classifier.",
+    await expect(
+      onPermissionRequest(shellRequest, { sessionId: "test-session" }),
+    ).resolves.toEqual({
+      kind: "denied-by-permission-request-hook",
+      message: "Blocked by safety classifier.",
+      interrupt: false,
     });
   });
 
@@ -356,11 +348,18 @@ describe("extension pre-tool hook", () => {
     });
 
     await loadExtensionModule();
-    const onPreToolUse = getPreToolHandler();
+    const onPermissionRequest = getPermissionHandler();
 
-    await expect(onPreToolUse(shellToolInput)).resolves.toEqual({
-      permissionDecision: "deny",
-      permissionDecisionReason: "deletes tracked files",
+    await expect(
+      onPermissionRequest(shellRequest, { sessionId: "test-session" }),
+    ).resolves.toEqual({
+      kind: "denied-by-permission-request-hook",
+      message: "deletes tracked files",
+      interrupt: false,
+    });
+    expect(mocks.log).toHaveBeenCalledWith("classifier result: block (deletes tracked files)", {
+      ephemeral: true,
+      level: "info",
     });
   });
 
@@ -368,107 +367,139 @@ describe("extension pre-tool hook", () => {
     mocks.classifyShellSafetyWithModel.mockRejectedValueOnce(new Error("classifier unavailable"));
 
     await loadExtensionModule();
-    const onPreToolUse = getPreToolHandler();
+    const onPermissionRequest = getPermissionHandler();
 
-    await expect(onPreToolUse(shellToolInput)).resolves.toBeUndefined();
+    await expect(
+      onPermissionRequest(shellRequest, { sessionId: "test-session" }),
+    ).resolves.toEqual({
+      kind: "no-result",
+    });
     expect(mocks.log).toHaveBeenCalledWith("classifier error: classifier unavailable", {
       ephemeral: true,
       level: "error",
     });
   });
 
-  it("approves non-shell tools directly", async () => {
+  it("approves read and write permission requests directly", async () => {
     await loadExtensionModule();
-    const onPreToolUse = getPreToolHandler();
+    const onPermissionRequest = getPermissionHandler();
 
-    for (const toolName of [
-      "view",
-      "read",
-      "edit",
-      "create",
-      "apply_patch",
-      "functions.view",
-      "functions.edit",
-      "custom-server.view",
-      "github-mcp-server.get_issue",
-    ]) {
-      await expect(
-        onPreToolUse({
-          toolName,
-          toolArgs:
-            toolName === "github-mcp-server.get_issue"
-              ? { owner: "github", repo: "copilot", issue_number: 1 }
-              : { path: "src/extension.ts" },
-          timestamp: 1,
-          cwd: "/workspace",
-        }),
-      ).resolves.toEqual({ permissionDecision: "allow" });
-    }
-
+    await expect(
+      onPermissionRequest(
+        {
+          kind: "read",
+          path: "src/extension.ts",
+          intention: "Inspect extension source",
+        },
+        { sessionId: "test-session" },
+      ),
+    ).resolves.toEqual({ kind: "approved" });
+    await expect(
+      onPermissionRequest(
+        {
+          kind: "write",
+          fileName: "notes.txt",
+          diff: "",
+          intention: "Create notes",
+          canOfferSessionApproval: false,
+        },
+        { sessionId: "test-session" },
+      ),
+    ).resolves.toEqual({ kind: "approved" });
     expect(mocks.classifyShellSafetyWithModel).not.toHaveBeenCalled();
   });
 
-  it("approves non-shell tool names without treating suffixes as built-in tools", async () => {
+  it("approves read-only MCP permission requests and falls back for mutating MCP requests", async () => {
     await loadExtensionModule();
-    const onPreToolUse = getPreToolHandler();
+    const onPermissionRequest = getPermissionHandler();
+
+    const mcpRequest = {
+      kind: "mcp" as const,
+      serverName: "github-mcp-server",
+      toolName: "get_issue",
+      toolTitle: "Get issue",
+      args: { owner: "github", repo: "copilot", issue_number: 1 },
+      readOnly: true,
+    };
+
+    await expect(onPermissionRequest(mcpRequest, { sessionId: "test-session" })).resolves.toEqual({
+      kind: "approved",
+    });
+    await expect(
+      onPermissionRequest({ ...mcpRequest, readOnly: false }, { sessionId: "test-session" }),
+    ).resolves.toEqual({ kind: "no-result" });
+    expect(mocks.classifyShellSafetyWithModel).not.toHaveBeenCalled();
+  });
+
+  it("falls back for other permission request kinds", async () => {
+    await loadExtensionModule();
+    const onPermissionRequest = getPermissionHandler();
 
     await expect(
-      onPreToolUse({
-        toolName: "custom-server.view",
-        toolArgs: { path: "src/extension.ts" },
-        timestamp: 1,
-        cwd: "/workspace",
-      }),
-    ).resolves.toEqual({ permissionDecision: "allow" });
+      onPermissionRequest(
+        {
+          kind: "url",
+          url: "https://example.com",
+          intention: "Fetch documentation",
+        },
+        { sessionId: "test-session" },
+      ),
+    ).resolves.toEqual({ kind: "no-result" });
     expect(mocks.classifyShellSafetyWithModel).not.toHaveBeenCalled();
   });
 
   it("approves read-only shell requests without invoking the classifier", async () => {
     await loadExtensionModule();
-    const onPreToolUse = getPreToolHandler();
+    const onPermissionRequest = getPermissionHandler();
 
-    const request = createShellToolInput("git status", "Inspect repository status");
+    const request = createShellPermissionRequest("git status", "Inspect repository status");
 
-    await expect(Promise.resolve(onPreToolUse(request))).resolves.toEqual({
-      permissionDecision: "allow",
+    await expect(
+      onPermissionRequest(request, { sessionId: "test-session" }),
+    ).resolves.toEqual({
+      kind: "approved",
     });
     expect(mocks.classifyShellSafetyWithModel).not.toHaveBeenCalled();
   });
 
   it("approves heuristic read-only shell requests without invoking the classifier", async () => {
     await loadExtensionModule();
-    const onPreToolUse = getPreToolHandler();
+    const onPermissionRequest = getPermissionHandler();
 
-    const request = createShellToolInput(
+    const request = createShellPermissionRequest(
       "grep -n TODO src/extension.ts",
       "Search for TODO comments",
     );
 
-    await expect(Promise.resolve(onPreToolUse(request))).resolves.toEqual({
-      permissionDecision: "allow",
+    await expect(
+      onPermissionRequest(request, { sessionId: "test-session" }),
+    ).resolves.toEqual({
+      kind: "approved",
     });
     expect(mocks.classifyShellSafetyWithModel).not.toHaveBeenCalled();
   });
 
   it("falls back to the classifier for path-qualified shell commands", async () => {
     await loadExtensionModule();
-    const onPreToolUse = getPreToolHandler();
+    const onPermissionRequest = getPermissionHandler();
 
     const command = "./grep -n TODO src/extension.ts";
-    const description = "Search for TODO comments";
-    const request = createShellToolInput(command, description);
+    const intention = "Search for TODO comments";
+    const request = createShellPermissionRequest(command, intention);
 
-    await expect(Promise.resolve(onPreToolUse(request))).resolves.toEqual({
-      permissionDecision: "allow",
+    await expect(
+      onPermissionRequest(request, { sessionId: "test-session" }),
+    ).resolves.toEqual({
+      kind: "approved",
     });
     expect(mocks.classifyShellSafetyWithModel).toHaveBeenCalledTimes(1);
     expect(mocks.classifyShellSafetyWithModel).toHaveBeenCalledWith(
       expect.objectContaining({
         command,
-        intention: description,
+        intention,
         shellRequest: expect.objectContaining({
           fullCommandText: command,
-          intention: description,
+          intention,
           commands: [
             {
               identifier: "./grep",
@@ -484,117 +515,83 @@ describe("extension pre-tool hook", () => {
 
   it("approves safe shell redirections to cwd paths without invoking the classifier", async () => {
     await loadExtensionModule();
-    const onPreToolUse = getPreToolHandler();
+    const onPermissionRequest = getPermissionHandler();
 
-    const request = createShellToolInput(
+    const request = createShellPermissionRequest(
       "grep -n TODO src/extension.ts > logs/grep-output.txt",
       "Capture TODO matches in a local file",
     );
 
-    await expect(Promise.resolve(onPreToolUse(request))).resolves.toEqual({
-      permissionDecision: "allow",
+    await expect(
+      onPermissionRequest(request, { sessionId: "test-session" }),
+    ).resolves.toEqual({
+      kind: "approved",
     });
     expect(mocks.classifyShellSafetyWithModel).not.toHaveBeenCalled();
-  });
-
-  it("uses pre-tool cwd when approving relative shell redirections", async () => {
-    await loadExtensionModule();
-    const onPreToolUse = getPreToolHandler();
-
-    const shellCwd = path.join(path.dirname(process.cwd()), "automode-shell-cwd");
-    const request = createShellToolInput(
-      `grep -n TODO src/extension.ts > ../${path.basename(shellCwd)}/logs/grep-output.txt`,
-      "Capture TODO matches in a local file",
-      shellCwd,
-    );
-
-    await expect(Promise.resolve(onPreToolUse(request))).resolves.toEqual({
-      permissionDecision: "allow",
-    });
-    expect(mocks.classifyShellSafetyWithModel).not.toHaveBeenCalled();
-  });
-
-  it("falls back when a relative redirection escapes the pre-tool cwd", async () => {
-    await loadExtensionModule();
-    const onPreToolUse = getPreToolHandler();
-
-    const command = `grep -n TODO src/extension.ts > ../${path.basename(process.cwd())}/logs/grep-output.txt`;
-    const description = "Capture TODO matches outside the shell cwd";
-    const shellCwd = path.join(path.dirname(process.cwd()), "automode-shell-cwd");
-    const request = createShellToolInput(command, description, shellCwd);
-
-    await expect(Promise.resolve(onPreToolUse(request))).resolves.toEqual({
-      permissionDecision: "allow",
-    });
-    expect(mocks.classifyShellSafetyWithModel).toHaveBeenCalledTimes(1);
-    expect(mocks.classifyShellSafetyWithModel).toHaveBeenCalledWith(
-      expect.objectContaining({
-        command,
-        intention: description,
-        shellRequest: expect.objectContaining({
-          fullCommandText: command,
-          intention: description,
-          possiblePaths: [`../${path.basename(process.cwd())}/logs/grep-output.txt`],
-          cwd: shellCwd,
-        }),
-      }),
-      undefined,
-    );
   });
 
   it("hard denies destructive git commands before invoking the classifier", async () => {
     await loadExtensionModule();
-    const onPreToolUse = getPreToolHandler();
+    const onPermissionRequest = getPermissionHandler();
 
-    const request = createShellToolInput(
+    const request = createShellPermissionRequest(
       "git reset --hard HEAD~1",
       "Discard local changes and rewind HEAD",
     );
 
-    await expect(Promise.resolve(onPreToolUse(request))).resolves.toEqual({
-      permissionDecision: "deny",
-      permissionDecisionReason: "git reset can rewrite history or overwrite working tree changes.",
+    await expect(
+      onPermissionRequest(request, { sessionId: "test-session" }),
+    ).resolves.toEqual({
+      kind: "denied-by-permission-request-hook",
+      message: "git reset can rewrite history or overwrite working tree changes.",
+      interrupt: false,
     });
     expect(mocks.classifyShellSafetyWithModel).not.toHaveBeenCalled();
   });
 
   it("hard denies force pushes before invoking the classifier", async () => {
     await loadExtensionModule();
-    const onPreToolUse = getPreToolHandler();
+    const onPermissionRequest = getPermissionHandler();
 
-    const request = createShellToolInput("git push --force origin main", "Force-push local commits");
+    const request = createShellPermissionRequest(
+      "git push --force origin main",
+      "Force-push local commits",
+    );
 
-    await expect(Promise.resolve(onPreToolUse(request))).resolves.toEqual({
-      permissionDecision: "deny",
-      permissionDecisionReason: "git push can force-update or delete remote refs.",
+    await expect(
+      onPermissionRequest(request, { sessionId: "test-session" }),
+    ).resolves.toEqual({
+      kind: "denied-by-permission-request-hook",
+      message: "git push can force-update or delete remote refs.",
+      interrupt: false,
     });
     expect(mocks.classifyShellSafetyWithModel).not.toHaveBeenCalled();
   });
 
   it("still falls back to the classifier for non-inspection git commands", async () => {
     await loadExtensionModule();
-    const onPreToolUse = getPreToolHandler();
+    const onPermissionRequest = getPermissionHandler();
 
-    const command = "git push origin main";
-    const description = "Publish local commits";
-    const request = createShellToolInput(command, description);
+    const command = "git push origin feature";
+    const intention = "Publish local commits";
+    const request = createShellPermissionRequest(command, intention);
 
-    await expect(onPreToolUse(request)).resolves.toEqual({
-      permissionDecision: "allow",
+    await expect(onPermissionRequest(request, { sessionId: "test-session" })).resolves.toEqual({
+      kind: "approved",
     });
     expect(mocks.classifyShellSafetyWithModel).toHaveBeenCalledTimes(1);
     expect(mocks.classifyShellSafetyWithModel).toHaveBeenCalledWith(
       expect.objectContaining({
         command,
-        intention: description,
+        intention,
         shellRequest: expect.objectContaining({
           fullCommandText: command,
-          intention: description,
+          intention,
           commands: [
             {
               identifier: "git",
               readOnly: false,
-              args: ["push", "origin", "main"],
+              args: ["push", "origin", "feature"],
             },
           ],
         }),
@@ -603,39 +600,20 @@ describe("extension pre-tool hook", () => {
     );
   });
 
-  it("ignores permission request metadata that is not part of pre-tool hook input", async () => {
+  it("falls back to the classifier without parsed metadata for unsupported shell syntax", async () => {
     await loadExtensionModule();
-    const onPreToolUse = getPreToolHandler();
+    const onPermissionRequest = getPermissionHandler();
 
-    const embeddedShellRequest = {
-      kind: "shell" as const,
-      fullCommandText: "npm test -- --runInBand",
-      intention: "Run the test suite",
-      commands: [{ identifier: "npm", readOnly: false }],
-      possiblePaths: ["./package.json"],
-      possibleUrls: [{ url: "https://registry.npmjs.org/" }],
-      hasWriteFileRedirection: false,
-      canOfferSessionApproval: true,
-      warning: null,
-    };
+    const command = "grep TODO $(rm -rf build)";
+    const intention = "Search TODOs";
+    const request = createShellPermissionRequest(command, intention);
 
-    await expect(
-      onPreToolUse({
-        ...shellToolInput,
-        permissionRequest: embeddedShellRequest,
-      }),
-    ).resolves.toEqual({
-      permissionDecision: "allow",
+    await expect(onPermissionRequest(request, { sessionId: "test-session" })).resolves.toEqual({
+      kind: "approved",
     });
-    expect(mocks.classifyShellSafetyWithModel).toHaveBeenCalledTimes(1);
     expect(mocks.classifyShellSafetyWithModel).toHaveBeenCalledWith(
-      expect.objectContaining({
-        command: shellCommand,
-        intention: shellDescription,
-        shellRequest: expect.objectContaining({
-          fullCommandText: shellCommand,
-          intention: shellDescription,
-        }),
+      expect.not.objectContaining({
+        shellRequest: expect.anything(),
       }),
       undefined,
     );

@@ -1,17 +1,5 @@
 import { z } from "zod";
 
-function parseJsonToolArgs(toolArgs: unknown): unknown {
-  if (typeof toolArgs !== "string") {
-    return toolArgs;
-  }
-
-  try {
-    return JSON.parse(toolArgs) as unknown;
-  } catch {
-    return toolArgs;
-  }
-}
-
 export const ShellPermissionCommandSchema = z.object({
   identifier: z.string(),
   readOnly: z.boolean(),
@@ -38,32 +26,3 @@ export const ShellPermissionRequestSchema = z.object({
 });
 
 export type ShellPermissionRequest = z.infer<typeof ShellPermissionRequestSchema>;
-
-export const PreToolUseInputSchema = z.looseObject({
-  sessionId: z.string().optional(),
-  timestamp: z.number(),
-  cwd: z.string(),
-  toolName: z.string(),
-  toolArgs: z.unknown(),
-});
-
-export const PreToolUseHookOutputSchema = z.object({
-  permissionDecision: z.enum(["allow", "deny", "ask"]).optional(),
-  permissionDecisionReason: z.string().optional(),
-  modifiedArgs: z.unknown().optional(),
-  additionalContext: z.string().optional(),
-  suppressOutput: z.boolean().optional(),
-});
-
-export type PreToolUseHookOutput = z.infer<typeof PreToolUseHookOutputSchema>;
-
-export const ShellToolArgsSchema = z.preprocess(
-  parseJsonToolArgs,
-  z.looseObject({
-    command: z.string(),
-    description: z.string(),
-    timeout: z.number().optional(),
-    shellId: z.string().optional(),
-    async: z.boolean().optional(),
-  }),
-);

@@ -4,7 +4,7 @@ import { createAutoCommand } from "./commands/auto.js";
 import { createAutomodelCommand } from "./commands/automodel.js";
 import { loadConfig } from "./config.js";
 import { getGitHubAuthToken } from "./github-auth.js";
-import { createPreToolUseHandler } from "./pre-tool-policy.js";
+import { createPermissionRequestHandler } from "./permission-policy.js";
 
 const latestUserPrompts = new Map<string, string>();
 
@@ -73,15 +73,15 @@ if (await canRegisterExtension()) {
       onUserPromptSubmitted: async (input, invocation) => {
         rememberLatestUserPrompt(input, invocation);
       },
-      onPreToolUse: createPreToolUseHandler({
-        config,
-        classifyShellSafetyWithModel,
-        getLatestUserPrompt: (sessionId) => latestUserPrompts.get(sessionId),
-        logger: {
-          log: (...args) => session.log(...args),
-        },
-      }),
     },
+    onPermissionRequest: createPermissionRequestHandler({
+      config,
+      classifyShellSafetyWithModel,
+      getLatestUserPrompt: (sessionId) => latestUserPrompts.get(sessionId),
+      logger: {
+        log: (...args) => session.log(...args),
+      },
+    }),
   });
 
   session.on("session.shutdown", async (): Promise<void> => {
