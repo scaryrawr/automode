@@ -36,9 +36,11 @@ function getClassifierEnv(): NodeJS.ProcessEnv {
 let client: CopilotClient | null = null;
 function getCopilotClient(): CopilotClient {
   client ??= new CopilotClient({
-    cliPath: process.execPath,
+    connection: {
+      kind: "stdio",
+      path: process.execPath,
+    },
     env: getClassifierEnv(),
-    autoStart: true,
   });
 
   return client;
